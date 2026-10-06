@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 
 export default function Home() {
   const [tareas, setTareas] = useState([]);
@@ -8,7 +8,7 @@ export default function Home() {
   const [error, setError] = useState("");
   const [logs, setLogs] = useState([]);
 
-  async function peticion(metodo, url, body) {
+  const peticion = useCallback(async (metodo, url, body) => {
     const inicio = performance.now();
     const opciones = { method: metodo };
     if (body) {
@@ -24,42 +24,64 @@ export default function Home() {
       data = texto;
     }
     const ms = Math.round(performance.now() - inicio);
-    setLogs((prev) =>
-      [
-        { hora: new Date().toLocaleTimeString(), metodo, url, body, status: res.status, ms, respuesta: data },
-        ...prev,
-      ].slice(0, 20)
-    );
-    return { res, data };
-  }
+    const registro = {
+      hora: new Date().toLocaleTimeString(), metodo, url, body,
+      status: res.status, ms, respuesta: data,
+    };
+    return { res, data, registro };
+  }, []);
+
+  const registrar = useCallback((registro) => {
+    setLogs((prev) => [registro, ...prev].slice(0, 20));
+  }, []);
 
   async function cargar() {
-    const { res, data } = await peticion("GET", "/api/tareas");
+    const { res, data, registro } = await peticion("GET", "/api/tareas");
+    registrar(registro);
     if (!res.ok) return setError(data?.error || "Error al cargar las tareas");
     setError("");
     setTareas(data);
   }
 
   useEffect(() => {
-    cargar();
-  }, []);
+    let activo = true;
+
+    peticion("GET", "/api/tareas")
+      .then(({ res, data, registro }) => {
+        if (!activo) return;
+        registrar(registro);
+        if (!res.ok) return setError(data?.error || "Error al cargar las tareas");
+        setError("");
+        setTareas(data);
+      })
+      .catch(() => {
+        if (activo) setError("No se pudo conectar con la aplicación.");
+      });
+
+    return () => {
+      activo = false;
+    };
+  }, [peticion, registrar]);
 
   async function crear(e) {
     e.preventDefault();
     if (!titulo.trim()) return;
-    const { res, data } = await peticion("POST", "/api/tareas", { titulo });
+    const { res, data, registro } = await peticion("POST", "/api/tareas", { titulo });
+    registrar(registro);
     if (!res.ok) return setError(data?.error || "Error al crear la tarea");
     setTitulo("");
     cargar();
   }
 
   async function alternar(tarea) {
-    await peticion("PUT", `/api/tareas/${tarea.id}`, { completada: !tarea.completada });
+    const { registro } = await peticion("PUT", `/api/tareas/${tarea.id}`, { completada: !tarea.completada });
+    registrar(registro);
     cargar();
   }
 
   async function eliminar(id) {
-    await peticion("DELETE", `/api/tareas/${id}`);
+    const { registro } = await peticion("DELETE", `/api/tareas/${id}`);
+    registrar(registro);
     cargar();
   }
 
